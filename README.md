@@ -1,8 +1,6 @@
 # Pytorch--Linking cnn with gcn
 
 This is pytorch reimplementaion of linking convolutional neural networks (CNN) with graph convolutional networks (GCN). 
-The current implementation supports dataset_batch_size > 1, therefore you can feed patches from multiple cases into CNN.
-For hyperparams, I set the num of gaussian kenels >= num of node neighbourhoods.
 Original keras implementation can be found @ https://github.com/chushan89/Linking-CNN-GCN
 If you use the software, you are welcome to reference the following paper:
 ```
