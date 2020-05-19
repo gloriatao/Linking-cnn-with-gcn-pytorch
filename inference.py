@@ -1,102 +1,88 @@
-from time import time
-from utils import ArteryVein_data
-from tensorflow import keras
-import numpy as np
-from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from utils.models import Av_CNN3D_model, Av_CNN_GCN_model, Av_CNN_GCN_trans_model
-# from models_trans import Av_GCN3D_L_trans_model
 import os
+from utils import *
+from config import Config
+from utils.models import Av_CNN3D_model, Av_CNN_GCN_model#, Av_CNN_GCN_trans_model
 
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
+os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 
+def inference(X_batch,Y_batch,NX_batch, config):
+    global processed_batches
 
-DataType = 'CTPA'
-# DataType = 'NCCT'
+    model.eval()
+    processed_batches = 0
+    correct, total = 0, 0
 
-orient = 'Orient'
-#orient = 'no_Orient'
+    with torch.no_grad():
 
-# path_data = '/srv/2-lkeb-17-dl01/zzhai/Data/ArteryVeinData_{}/'.format(orient)
-path_data = '/exports/lkeb-hpc/zzhai/Data/Artery_Vein/{}/'.format(orient)
+        processed_batches = processed_batches + 1
+        X_batch, Y_batch, NX_batch = X_batch.cuda(), Y_batch.cuda(), NX_batch.cuda()
 
-Cases = [
-'/The-First-Hospital-of-SYSU02{}/right/'.format(DataType), #0
-'/The-First-Hospital-of-SYSU02{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU03{}/right/'.format(DataType),
-'/The-First-Hospital-of-SYSU03{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU05{}/right/'.format(DataType),  # 4
-'/The-First-Hospital-of-SYSU05{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU07{}/right/'.format(DataType),
-'/The-First-Hospital-of-SYSU07{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU08{}/right/'.format(DataType), # 8
-'/The-First-Hospital-of-SYSU08{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU09{}/right/'.format(DataType),
-'/The-First-Hospital-of-SYSU09{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU10{}/right/'.format(DataType),  # 12
-'/The-First-Hospital-of-SYSU10{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU11{}/right/'.format(DataType),
-'/The-First-Hospital-of-SYSU11{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU12{}/right/'.format(DataType),  # 16
-'/The-First-Hospital-of-SYSU12{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU13{}/right/'.format(DataType),
-'/The-First-Hospital-of-SYSU13{}/left/'.format(DataType),
-'/The-First-Hospital-of-SYSU14{}/right/'.format(DataType),  #20
-'/The-First-Hospital-of-SYSU14{}/left/'.format(DataType)
-]
-Case_train = Cases[0:16]
-Case_val= Cases[16:]
+        output = model.forward(X_batch, NX_batch)
+        # if len(output.shape) == 3:
+        #     output = output.reshape(config.batch_size*config.num_nodes, -1)
+        #     Y_batch = Y_batch.reshape(config.batch_size * config.num_nodes)
+        pred = torch.argmax(output, dim=1)
+        correct += torch.sum(pred.eq(Y_batch))
+        total += output.shape[0]
+        acc = np.array(correct.cpu())/total
 
-batchSz = 30
-Num_classes = 2
-[pSx, pSy, pSz] = [32, 32, 5]
-Num_neighbors = 2
-#nornalization = 'gnormalization'
-nornalization = 'pnormalization'
+        print('acc:', acc)
 
+    print("done")
 
-# model_name = 'AV_CNN3D'
-# model_name = 'AV_CNN_GCN'
-model_name = 'AV_CNN_GCN_trans'
-if model_name=='AV_CNN3D':
-    model = Av_CNN3D_model(patch_sz=(pSx, pSy, pSz), droupout_rate=0.5, number_class=Num_classes)
-    model_h5 = './logs/CTPA/pnormalization/GenAv_CNN3D_L_model_ep100_bt128_lr0.001_dp0.5_avs2019-05-29/models.h5'
-    model.load_weights(filepath=model_h5)
-    optimizer = keras.optimizers.SGD(lr=1e-3, momentum=0.9, nesterov=True)
-    loss = keras.losses.categorical_crossentropy
-    model.compile(loss=loss, optimizer=optimizer)
+if __name__ == '__main__':
+    config = Config()
+    model_name = config.model_name
+    use_cuda = torch.cuda.is_available()
 
-    for case in Case_val:
-        case = [case]
-        data = ArteryVein_data.load_data(path=path_data, case_name=case, shuffel=False)
-        prediction = model.predict_generator(generator=ArteryVein_data.DataGenerator(data, batchSz, withNeighbor=False),
-                                             steps=data[0].num_nodes / batchSz)
-        result_file = '{0}{1}predicts_{2}.npy'.format(path_data, case[0], model_name)
-        np.save(result_file, prediction[:data[0].num_nodes, ])
-        print('Predicting case {} is finished!'.format(case[0]))
+    # path-----------------------------------------------------------------------------------
+    if not os.path.exists(config.backupDir):
+        os.mkdir(config.backupDir)
 
-elif model_name == 'AV_GCN':
-    model = Av_CNN_GCN_model(patch_sz=(pSx, pSy, pSz), droupout_rate= 0.5, number_class=Num_classes, number_neighbors=Num_neighbors)
-    model_h5 = './logs/CTPA/pnormalization/GenAV_gcn_L_ep100_bt128_lr0.001_dp0.5_avs2019-06-04/models_best.h5'
-    model.load_weights(filepath=model_h5)
-    optimizer = keras.optimizers.SGD(lr=1e-3, momentum=0.9, nesterov=True)
-    loss = keras.losses.categorical_crossentropy
-    model.compile(loss=loss, optimizer=optimizer)
+    # GPU-----------------------------------------------------------------------------------
+    kwargs = {'num_workers': config.num_workers, 'pin_memory': True} if use_cuda else {}
+    device = torch.device("cuda:%s" % str(config.gpus[0]) if use_cuda else "cpu")
+    if use_cuda:
+        torch.cuda.set_device(config.gpus[0])
+        print("GPU is available!")
+    else:
+        print("GPU is not available!!!")
 
-    for case in Case_val:
-        case = [case]
-        data = ArteryVein_data.load_data(path=path_data, case_name=case, Num_neighbor=Num_neighbors, nornalization=nornalization)
-        prediction = model.predict_generator(generator=ArteryVein_data.DataGenerator(data, batchSz, withNeighbor=True),
-                                             steps= data[0].num_nodes/batchSz )
-        result_file = '{0}{1}predicts_{2}.npy'.format(path_data, case[0], model_name)
-        np.save(result_file, prediction[:data[0].num_nodes,])
-        print('Predicting case {} is finished!'.format(case[0]))
+    # Load config params-----------------------------------------------------------------------
+    if model_name == 'AV_CNN3D':
+        usingNeighbors = False
+        model = Av_CNN3D_model(droupout_rate=config.dp, number_class=config.Num_classes)
+    elif model_name == 'AV_CNN_GCN':
+        model = Av_CNN_GCN_model(cnnOFeat_len=10, gcnOFeat_len=config.Num_classes,
+                                 gcnNumGaussian=6, gaussian_hidden_feat=3, number_neighbors=2, droupout_rate=0.5)
 
-elif model_name == 'AV_GCN_trans':
-    model = Av_CNN_GCN_trans_model(patch_sz=(pSx, pSy, pSz), droupout_rate=0.5, number_class=Num_classes,
-                             number_neighbors=Num_neighbors)
-    model_h5 = ''
-    model.load_weights(filepath=model_h5)
+    model = model.cuda()
+    # weights-----------------------------------------------------------------------------------
+    if config.weightFile != 'none':
+        model.load_weights(config.weightFile)
+    else:
+        model.seen = 0
+
+    traingraphes = load_data(config.imgDirPath, config.case_list_train, Num_neighbor=config.Num_neighbors, shuffel=False)
+    for data_idx in range(len(traingraphes)):
+        graph = traingraphes[data_idx]
+        patch_cnt = 0
+        while patch_cnt + config.num_nodes <= len(graph.inds):
+            X_batch, Y_batch, NX_batch = graph.next_node(node_num=config.num_nodes, WithNeighbor=True)
+            Y_batch = np.argmax(Y_batch, axis=1)
+            X_batch = torch.tensor(X_batch).float().permute(0, 3, 1, 2)
+            Y_batch = torch.tensor(Y_batch).long()
+            NX_batch = torch.tensor(NX_batch).float().permute(0, 1, 4, 2, 3).squeeze(dim=0)
+
+            X_batch = X_batch[:, None, :, :]  # node count, channel, depth, width, height
+            NX_batch = NX_batch[:, :, None, :, :]  # node count,neighbour,  channel, depth, width, height
+
+            patch_cnt += config.num_nodes
+
+            inference(X_batch,Y_batch,NX_batch, config)
+
+    print('Done!')
+
 
 
 
